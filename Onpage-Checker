@@ -1,0 +1,438 @@
+    /* Crawl Sitemap - 放置index */  
+
+        //宣告
+
+        var arrSitemapIndex = '';                           //Sitemap Index 網址放這
+        var arrUrls = [window.location.origin + '/sitemap.xml'];                               //若無Sitemap Index，Sitemap 放這
+        var arrHrefs = [];                                  //紀錄網頁
+        var reg = new RegExp(window.location.origin);       //比對是網站相關連結
+
+        if(!arrSitemapIndex && !arrUrls[0]){
+            throw new Error('Input Sitemap Index or Sitemaps')
+        }
+
+        //抓每一Sitemap的內容
+
+        async function crawlSitemaps(){
+            if(arrSitemapIndex){                                                    //抓Sitemap Index 裡面的Sitemaps
+                arrUrls = [];
+                await fetch(arrSitemapIndex).then(res => res.text()).then(html => {
+                    var parser = new DOMParser();
+                    var doc = parser.parseFromString(html, 'text/html');
+                    var hrefs=  doc.querySelectorAll('loc');
+                    for(var j=0; j<hrefs.length; j++){
+                        var hrefText = hrefs[j].innerText;
+                        reg.test(hrefText) ? arrUrls.push(hrefText) : '';
+                        console.log('Searching Sitemaps')
+                    }
+                    console.log('Sitemap Index Fetch Working')
+                })
+            }   
+
+            for(var i=0; i<arrUrls.length; i++){                                    //抓Sitemap 裡面的每個網址
+                await fetch(arrUrls[i]).then(res => res.text()).then(html => {
+                    var parser = new DOMParser();
+                    var doc = parser.parseFromString(html, 'text/html');
+                    var hrefs = doc.querySelectorAll('loc');
+                    for(var j=0; j<hrefs.length; j++){
+                        var hrefText = hrefs[j].innerText;
+                        reg.test(hrefText) ? arrHrefs.push(hrefText) : '';
+                        console.log('Searching Sites')
+                    }
+                    console.log('Sitemap Fetch Working')
+                })
+            }
+        }
+        crawlSitemaps();
+
+    /* －－－－－－－－－Main Investigate－－－－－－－－－ */
+
+    var auditItem = [
+        '網址',
+        'Status Code',
+        
+        'h1',
+        'h2',
+        'h3',
+        
+        'title',
+        'title length',
+        'desc',
+        'desc length',
+        
+        'html Lang',
+        'og Title',
+        // 'Structure Data',
+        // 'BreadCrumbList',
+        
+        'canonical',        
+        
+        'style',
+        'span',
+        'br',
+        'metaCharset',
+        '&nbsp;',
+
+        'header',
+        'nav',
+        'main',
+        'article',
+        'section',
+        'aside',
+        'footer',
+        'mark',
+        'time',
+        'address',
+    ]
+
+    var audit = {                              //'網址':[記錄們]
+
+    };
+
+    var audit2 = {
+        'img Alt': {},                          //{'網頁':["src-1",'src-2']}     
+        'img Compress': {},                     //{'網頁':["src-1",'src-2']}     
+        'hrefOutRel': {},                       //nofollow
+        'hrefOutTarget': {},                    //_blank 
+        'hrefInRel': {},                        //沒東西
+        'hrefInTarget': {},                     //沒東西
+        '404':{},                               //特定網頁裡有404的連結
+        'Not Webp':{},                          //並非Webp或Gif
+        'Wrong AP':{}                    //特定網站裡面的營銷連結是否錯誤
+    }
+
+    var audit3 = {
+        'langs': new Set(),                     //有哪些語言
+        'lack Url':[]                           //哪些連結是Sitemap沒有的
+    }
+
+    /* Main Function */
+
+    var homePage = window.location.origin;                          //宣告
+    var pages = new Set([homePage + '/']);
+    var page404s = new Set();
+    var urls = [homePage + '/'];
+    var reg = new RegExp('^' + homePage);
+
+    var s1 = document.createElement('script');                      //引入 file-saver 模組
+    var s2 = document.createElement('script');                      //引入 exceljs
+    s1.src = "https://cdn.jsdelivr.net/npm/file-saver@2.0.5";
+    s2.src = "https://unpkg.com/exceljs/dist/exceljs.min.js";
+    document.querySelector('head').append(s1);
+    document.querySelector('head').append(s2);
+
+    async function check404(href,url){
+        await fetch(href).then(res => {
+            if (/4.*/.test(res.status)) { //4XX Test
+                audit2['404'][url] = audit2['404'][url]||[];
+                audit2['404'][url].push(href);
+            }
+        })
+    }
+
+    async function crawlPages() {
+
+        for (var i = 0; i < urls.length; i++) {
+            var url = urls[i];
+            audit[url] = [];
+            await fetch(url).then(res => {
+                if (/4.*/.test(res.status)) { //4XX Test
+                    audit[url].push('404');
+                    page404s.add(url);
+
+                } else if (/5.*/.test(res.status)) { //5XX Test
+                    audit[url].push('503')
+
+                } else if (/301/.test(res.status)) { //301 Test
+                    audit[url].push('301');
+                    return res.text();
+
+                } else if (/302/.test(res.status)) { //301 Test
+                    audit[url].push('302');
+                    return res.text();
+                } else {                             //200 Test
+                    audit[url].push('200');
+                    return res.text();
+                }
+            }).catch(() => {
+                audit[url].push('Failed to fetch\n');
+                console.log('failed to fetch');
+            }).then(html => {
+                var parser = new DOMParser();
+                var doc = parser.parseFromString(html, 'text/html');
+                var links = doc.querySelectorAll('body a[href]');                   //Gather Body Links
+                for (var j = 0; j < links.length; j++) {
+                    var href = links[j].href;
+                    if (reg.test(href) && !/[#?]/.test(href) && !pages.has(href)){
+                            urls.push(href);
+                            pages.add(href);                      
+                    }
+                }
+
+                /* h1,h2,h3 Check */
+
+                var h1s = [],h2s = [],h3s = [];
+                doc.querySelectorAll('h1').forEach(x => h1s.push(x.innerText));
+                doc.querySelectorAll('h2').forEach(x => h2s.push(x.innerText));
+                doc.querySelectorAll('h3').forEach(x => h3s.push(x.innerText));
+                var arrH = [h1s||['－'],h2s||['－'],h3s||['－']];
+                for(var j=0; j <arrH.length; j++){
+                    if(arrH[j].length === 0){
+                        audit[url].push('－')
+                    }
+                    else{
+                        audit[url].push(arrH[j].join('🦊'))
+                    }
+                }
+                
+                /* Title. Desc Check */
+                var title = doc.querySelector('title');
+                var desc = doc.querySelector('meta[name="description"]');
+                var manReg = /[\u4e00-\u9fa5]/;
+
+                if (title) {
+                    var titleText = title.innerText;
+                    var titleLength = titleText.split('').map(x => manReg.test(x) ? 2 : 1).reduce((a, b) => a + b, 0);
+                    audit[url].push(titleText);
+                    audit[url].push(titleLength);
+                } else {
+                    audit[url].push('Unset');
+                    audit[url].push('0');
+                }
+                if (desc) {
+                    var descLength = desc.content.split('').map(x => manReg.test(x) ? 2 : 1).reduce((a, b) => a + b, 0);
+                    audit[url].push(desc.content);
+                    audit[url].push(descLength);
+                } else {
+                    audit[url].push('Unset');
+                    audit[url].push('0');
+                }
+
+                /* htmlLang Check */
+                var htmlLang = doc.querySelector('html[lang]');
+                if (htmlLang) {
+                    audit[url].push('O');
+                    audit3['langs'].add(htmlLang.lang);
+                }
+                else{
+                    audit[url].push('X');
+                }
+
+                /* OG Set */ 
+                var vueOgTitle = doc.querySelector('meta[data-hid="og:title"]');
+                var commonOgTitle = doc.querySelector('meta[property="og:title"]');
+                vueOgTitle ? audit[url].push(vueOgTitle.content) :
+                commonOgTitle ? audit[url].push(commonOgTitle.content) : audit[url].push('Unset')
+
+                /* Canonical Check */
+                var can = doc.querySelector('link[rel="canonical"]');
+                can ? audit[url].push(can.href) : audit[url].push('Unset')
+
+                /* style, span, br,metaCharset , Check */
+                var styles = doc.querySelector('.article [style]:not(col):not([style*="display:none"])');
+                var spans = doc.querySelector('.rich-text span');
+                var br = doc.querySelector('.rich-text br');
+                var metas = doc.querySelector('h1 meta, h2 meta, h3 meta, p meta');
+                
+                styles ? audit[url].push('Exist') : audit[url].push('－');
+                spans ? audit[url].push('Exist') : audit[url].push('－');
+                br ? audit[url].push('Exist') : audit[url].push('－');
+                metas ? audit[url].push('Exist') : audit[url].push('－');
+
+                /* &nbsp; Check */
+
+                var ps = doc.querySelectorAll('.rich-text p');
+                var psBoolean = false;
+                for(var j=0; j<ps.length; j++){
+                    // if (ps[j].innerText.length === 1 && !/[a-zA-Z0-9]/.test(ps[j].innerText)){
+                    //     psBoolean = true;
+                    //     break;
+                    // }
+                    if (/^ *&nbsp; *$/.test(ps[j].innerHTML)){
+                        psBoolean = true;
+                        break;
+                    }
+                }
+                psBoolean ? audit[url].push('Exist') : audit[url].push('－');
+
+
+                /* Html 5 Tag Check */
+                var html5Tags = ['header', 'nav', 'main', 'article', 'section', 'aside', 'footer', 'mark', 'time','address'];
+                for (var j = 0; j < html5Tags.length; j++) {
+                    doc.querySelector(html5Tags[j]) ? audit[url].push('O') : audit[url].push('X');
+                }
+
+                /* Img Alt & Compress Check & lazyload Check */
+                var imgSrcs = doc.querySelectorAll('img');
+                var logos = /c831294|84427e5|b6fdd62|fun88_2_logo_1f017d4592|logo_fun88winwin_701c7219f4|logo_d57549bb88|logo_k8wx_41e7af16e0|188bet_2_logo_53d6454dcd/
+                var imgReg = /(jpeg|jpg|png|gif|webp|tiff|bmp|raw|svg)$/; //以防抓到圖檔類型以外的東西
+                for (var j = 0; j < imgSrcs.length; j++) {              
+                    if (imgReg.test(imgSrcs[j].src) && imgSrcs[j].alt !== 'logo') {
+                        if(!imgSrcs[j].alt){
+                            audit2['img Alt'][url] = audit2['img Alt'][url] || ['－'];                      //Img Alt Check
+                            audit2['img Alt'][url].unshift(imgSrcs[j].src);
+                        }
+                        if(!/(webp|svg|gif)$/.test(imgSrcs[j].src)){
+                            audit2['Not Webp'][url] = audit2['Not Webp'][url] || [];                        //Webp Check
+                            audit2['Not Webp'][url].push(imgSrcs[j].src)
+                        }
+                        fetch(imgSrcs[j].src).then(res => res.blob()).then(blob => {
+                            if(blob.size >= 3000000){                                               //Img Size Check
+                                audit2['img Compress'][url] = audit2['img Compress'][url] || ['－'];
+                                audit2['img Compress'][url].unshift(imgSrcs[j].src)
+                            }
+                        })
+                    }
+                }
+
+                /* Wrong Affiliate */
+
+                var hrefAP = doc.querySelectorAll('a[href^="https://www.mg188online"]');
+                for(var j=0; j<hrefAP.length; j++){
+                    if(hrefAP[j].href != 'https://www.mg188online.com/bian-2.html'){
+                        audit2['Wrong AP'][url] = audit2['Wrong AP'][url]||[];
+                        audit2['Wrong AP'][url].push(hrefAP[j].href);
+                    }
+                }
+
+                /* href in / out rel and target */
+                var ahref = doc.querySelectorAll('a[href^="http"]'); 
+                for (var j = 0; j < ahref.length; j++) {
+                    if (reg.test(ahref[j].href)) {
+                        if (ahref[j].rel) {
+                            audit2['hrefInRel'][url] = audit2['hrefInRel'][url] || ['－'];
+                            audit2['hrefInRel'][url].unshift(ahref[j].href);
+                        }
+                        if (ahref[j].target) {
+                            audit2['hrefInTarget'][url] = audit2['hrefInTarget'][url] || ['－'];
+                            audit2['hrefInTarget'][url].unshift(ahref[j].href);
+                        }
+                    } else {
+                        if (!/nofollow/.test(ahref[j].rel)) {
+                            audit2['hrefOutRel'][url] = audit2['hrefOutRel'][url] || ['－'];
+                            audit2['hrefOutRel'][url].unshift(ahref[j].href);
+                        }
+                        if (!/_blank/.test(ahref[j].target)) {
+                            audit2['hrefOutTarget'][url] = audit2['hrefOutTarget'][url] || ['－'];
+                            audit2['hrefOutTarget'][url].unshift(ahref[j].href);
+                        }
+                    }
+                }
+
+                
+            })
+            console.log('pages fetch working')
+        }
+
+        /* 檢測有 404 連結的網頁 */
+        for(var i=0; i<urls.length; i++){
+            var url = urls[i]
+            await fetch(url).then(res => res.text()).then(html => {
+                var parser = new DOMParser();
+                var doc = parser.parseFromString(html, 'text/html');
+                var links = doc.querySelectorAll('body a[href]');
+                for(var j=0; j<links.length; j++){
+                    href = links[j].href;
+                    if (page404s.has(href)){
+                        console.log('404 searching')
+                        audit2['404'][url] = audit2['404'][url]||[];
+                        audit2['404'][url].push(href)
+                    }
+                }
+            })
+        }
+
+        /* Sitemap & Urls Check */
+        pages = Array.from(pages);
+        audit3['lack Url'] = arrHrefs.filter(x => !pages.includes(x));
+
+        console.log('Mission Complete !');
+
+        /* 輸出 */
+
+        //宣告
+
+        var workbook = new ExcelJS.Workbook();
+        var w1 = workbook.addWorksheet('A1');
+        var w2 = workbook.addWorksheet('A2');
+
+        //audit1
+        
+        w1.addRow(auditItem);
+        var a1Keys = Object.keys(audit);
+        for(var k=0; k<a1Keys.length; k++){
+            w1.addRow([a1Keys[k]].concat(audit[a1Keys[k]]))
+        }
+
+        //audit2
+
+        var a2Keys = Object.keys(audit2);
+        for(var i=0; i<a2Keys.length; i++){
+            w2.addRow([a2Keys[i]]);
+            w2.addRow(['網頁','問題連結']);        
+            var a2KeysInner = Object.keys(audit2[a2Keys[i]]);
+            var a2ValuesInner = Object.values(audit2[a2Keys[i]]);
+            for(var l = 0; l<a2KeysInner.length; l++){
+                w2.addRow([a2KeysInner[l]].concat(a2ValuesInner[l]));
+            }
+            w2.addRow([])
+        }
+
+        //audit3
+
+        var a3Keys = Object.keys(audit3);
+        var a3Values = Object.values(audit3).map(v => v instanceof Set ? Array.from(v) : v);;
+        for(var i=0; i<a3Keys.length; i++){
+            w2.addRow([a3Keys[i]]);
+            w2.addRow(a3Values[i]);
+            w2.addRow([]);
+        }
+
+        //樣式設定
+
+        w1.getRow(1).font = {name: '微軟正黑體' ,bold: true, size: 13};
+        w1.views = [{
+            state:'frozen',
+            xSplit: 1,
+            ySplit: 1,
+        }]
+
+        w1.getColumn('A').eachCell(cell => {
+            if(/^https?:\/\//.test(cell)){
+                cell.value = {
+                    text: cell.value,
+                    hyperlink: cell.value
+                };
+                cell.font = {
+                    color: { argb: '3366ff'}
+                }
+            }
+
+        })
+
+        w2.getColumn('A').eachCell(cell => {
+            if(/^https?:\/\//.test(cell)){
+                cell.value = {
+                    text: cell.value,
+                    hyperlink: cell.value
+                };
+                cell.font = {
+                    color: { argb: '3366ff'}
+                }
+            }
+
+        })
+
+        w1.columns[0].width = 60;
+        w2.columns[0].width = 60;
+
+        //存檔
+
+        workbook.xlsx.writeBuffer().then(data => {
+            var blob = new Blob([data],{ type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+            var webName = window.location.origin.replace(/http(s)?:\/\/(.+\.)?(.+)\..*/,'$3');
+            saveAs(blob,webName + ' seo-audit.xlsx')
+        })
+
+    }
+    crawlPages();
