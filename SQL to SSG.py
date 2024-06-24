@@ -36,7 +36,7 @@ try:
         # 定義 SQL 查詢語句
         # sql = "SELECT * FROM unified_article_pool LIMIT 100"
         # sql = "SELECT * FROM unified_article_pool_en LIMIT 10"
-        sql = "SELECT * FROM unified_article_pool_tran_ch LIMIT 1"
+        sql = "SELECT * FROM unified_article_pool_tran_ch LIMIT 30"
 
         # 執行 SQL 查詢
         cursor.execute(sql)
@@ -45,9 +45,10 @@ try:
         result = cursor.fetchall()
 
         # 處理查詢結果
+        i = 0
         for row in result:
             
-            ssg_check = []                                              #確認內容有無重複，避免 p 裡面又有 p 的Bug
+            ssg_check = ''                                              #確認內容有無重複，避免 p 裡面又有 p 的Bug
             ssg_final = []                                              #轉化為MarkDown的內容
 
             #Formatter 處理
@@ -73,7 +74,7 @@ try:
                 image_url = image_domain + image_path
                 img_res = rq.get(image_url, stream = True)
                 
-                if img_res.status == 200 :
+                if img_res.status_code == 200 :
                     with open(file_name, 'wb') as file :
                         for chunk in img_res.iter_content(chunk_size = 8192):
                             file.write(chunk)
@@ -140,13 +141,12 @@ try:
                         ssg_content = [f' * {list.text}' for list in lists]
                         ssg_content = '\n'.join(ssg_content)
                     else : continue
-                    ssg_check.append(node.text)
+                    ssg_check += node.text
                     ssg_final.append(ssg_content)
 
-
-
-            print('\n\n'.join(ssg_final))                           #設計完成，等待進一步處理
-
+            # print('\n\n'.join(ssg_final))                           #設計完成，等待進一步處理
+            print(f'successful {i}')
+            i += 1
 except pymysql.MySQLError as e:
     print(f"Error connecting to MySQL: {e}")
 finally:
